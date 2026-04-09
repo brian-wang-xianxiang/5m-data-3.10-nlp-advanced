@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LSTM Gates & Memory Cell Explainer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+  :root { --step-active: #534AB7; --step-done: #1D9E75; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', 'Segoe UI', sans-serif; background: #fff; color: #1a1a1a; }
+  .wrap { padding: 1.5rem 1rem 2rem; max-width: 880px; margin: 0 auto; }
+
+  /* Stepper */
+  .stepper { display: flex; align-items: center; gap: 0; margin-bottom: 2rem; overflow-x: auto; padding-bottom: 4px; }
+  .step-item { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; min-width: 64px; cursor: pointer; }
+  .step-circle { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; border: 2px solid; transition: all .25s; }
+  .step-label { font-size: 10px; text-align: center; color: #888; max-width: 78px; line-height: 1.3; }
+  .step-connector { flex: 1; height: 2px; margin-top: -20px; min-width: 6px; }
+
+  /* Panel */
+  .panel { background: #fff; border: 0.5px solid #ddd; border-radius: 12px; padding: 1.25rem 1.5rem; }
+  .panel-title { font-size: 15px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; }
+  .panel-sub { font-size: 13px; color: #666; margin-bottom: 1.25rem; line-height: 1.7; }
+
+  /* Sentence display */
+  .sentence-row { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin: 1rem 0; }
+  .word-chip { padding: 6px 12px; border-radius: 6px; font-size: 14px; font-weight: 500; background: #f3f2ee; color: #999; transition: all .3s; }
+  .word-chip.past { background: #e8e6e1; color: #666; }
+  .word-chip.current { background: #534AB7; color: #fff; transform: scale(1.08); box-shadow: 0 2px 10px rgba(83,74,183,0.3); }
+  .word-chip.future { background: #f3f2ee; color: #bbb; }
+  .word-chip.highlight-target { background: #1D9E75; color: #fff; transform: scale(1.08); box-shadow: 0 2px 10px rgba(29,158,117,0.3); }
+
+  /* Gate / Cell cards */
+  .gate-row { display: flex; gap: 10px; margin: 1rem 0; flex-wrap: wrap; }
+  .g-card { border-radius: 10px; padding: .85rem 1rem; flex: 1; min-width: 130px; border: 1.5px solid; }
+  .g-card.forget   { background: #FDECEC; border-color: #D94F4F; }
+  .g-card.input    { background: #FEF5E4; border-color: #D48B1A; }
+  .g-card.control  { background: #EEEDFE; border-color: #534AB7; }
+  .g-card.output   { background: #EDF5FE; border-color: #2E7BBF; }
+  .g-card.cell-st  { background: #E1F5EE; border-color: #1D9E75; }
+  .g-card.inactive { background: #f5f5f5; border-color: #ccc; }
+  .g-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; }
+  .g-val { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 600; }
+  .g-desc { font-size: 11px; margin-top: 5px; line-height: 1.5; }
+
+  /* Equation */
+  .eq-box { background: #f8f7f5; border: 0.5px solid #e4e2de; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 2; color: #444; }
+  .eq-f  { background: #FDECEC; padding: 1px 5px; border-radius: 3px; color: #8B2020; font-weight: 600; }
+  .eq-i  { background: #FEF5E4; padding: 1px 5px; border-radius: 3px; color: #633806; font-weight: 600; }
+  .eq-c  { background: #EEEDFE; padding: 1px 5px; border-radius: 3px; color: #3C3489; font-weight: 600; }
+  .eq-o  { background: #EDF5FE; padding: 1px 5px; border-radius: 3px; color: #1A5A8F; font-weight: 600; }
+  .eq-cell { background: #E1F5EE; padding: 1px 5px; border-radius: 3px; color: #085041; font-weight: 600; }
+
+  /* Result box */
+  .result-box { border-radius: 8px; padding: 1rem 1.25rem; margin-top: 1rem; }
+  .result-box.success { background: #E1F5EE; border: 0.5px solid #1D9E75; }
+  .result-box.info    { background: #EEEDFE; border: 0.5px solid #534AB7; }
+  .result-box.amber   { background: #FEF5E4; border: 0.5px solid #D48B1A; }
+  .result-box.blue    { background: #EDF5FE; border: 0.5px solid #2E7BBF; }
+  .result-box.red     { background: #FDECEC; border: 0.5px solid #D94F4F; }
+  .result-box p { font-size: 13px; line-height: 1.6; }
+  .result-box p.rb-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .result-box.success p { color: #085041; }
+  .result-box.info p    { color: #3C3489; }
+  .result-box.amber p   { color: #633806; }
+  .result-box.blue p    { color: #1A5A8F; }
+  .result-box.red p     { color: #8B2020; }
+
+  /* Memory timeline */
+  .mem-timeline { display: flex; align-items: stretch; gap: 0; margin: 1rem 0; }
+  .mem-segment { display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 0; }
+  .mem-word { font-size: 10px; color: #888; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; text-align: center; }
+  .mem-bar { width: 100%; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 600; color: #fff; }
+  .mem-gate { font-size: 7px; margin-top: 2px; font-family: 'JetBrains Mono', monospace; font-weight: 500; white-space: nowrap; }
+
+  /* Legend */
+  .legend-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #666; }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 3px; }
+
+  /* Nav */
+  .nav-row { display: flex; justify-content: space-between; margin-top: 1.5rem; gap: 10px; }
+  .btn { padding: 8px 20px; border-radius: 8px; border: 0.5px solid #ccc; background: transparent; cursor: pointer; font-size: 14px; color: #1a1a1a; transition: background .15s; font-family: 'DM Sans', sans-serif; }
+  .btn:hover { background: #f5f5f5; }
+  .btn.primary { background: #534AB7; color: #fff; border-color: #534AB7; }
+  .btn.primary:hover { background: #3C3489; border-color: #3C3489; }
+  .btn:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stepper" id="stepper"></div>
+  <div class="panel" id="panel-content"></div>
+  <div class="nav-row">
+    <button class="btn" id="btn-prev" onclick="navigate(-1)">\u2190 Previous</button>
+    <button class="btn primary" id="btn-next" onclick="navigate(1)">Next \u2192</button>
+  </div>
+</div>
+
+<script>
+let ls = 0;
+const STEPS = 9;
+
+const stepLabels = [
+  "The problem",
+  "LSTM overview",
+  "Forget gate",
+  "Input gate",
+  "Control gate",
+  "Output gate",
+  "At \"cat\": write",
+  "Persist \u2192 \"was\"",
+  "Full picture"
+];
+
+const words = ["The","cat",",","which","already","ate","\u2026",",","was","full","."];
+
+// --- helpers ---
+
+function buildStepper() {
+  const el = document.getElementById('stepper');
+  el.innerHTML = '';
+  stepLabels.forEach((label, i) => {
+    if (i > 0) {
+      const conn = document.createElement('div');
+      conn.className = 'step-connector';
+      conn.style.background = i < ls ? '#1D9E75' : '#ddd';
+      el.appendChild(conn);
+    }
+    const item = document.createElement('div');
+    item.className = 'step-item';
+    item.onclick = () => { ls = i; render(); };
+    const circle = document.createElement('div');
+    circle.className = 'step-circle';
+    let bg, color, bc;
+    if (i < ls) { bg = '#1D9E75'; color = '#fff'; bc = '#1D9E75'; }
+    else if (i === ls) { bg = '#534AB7'; color = '#fff'; bc = '#534AB7'; }
+    else { bg = 'transparent'; color = '#888'; bc = '#ccc'; }
+    circle.style.cssText = `background:${bg};color:${color};border-color:${bc}`;
+    circle.textContent = i < ls ? '\u2713' : (i + 1);
+    const lbl = document.createElement('div');
+    lbl.className = 'step-label';
+    lbl.textContent = label;
+    item.appendChild(circle); item.appendChild(lbl);
+    el.appendChild(item);
+  });
+}
+
+function makeSentence(currentIdx, highlightIdx) {
+  return '<div class="sentence-row">' + words.map((w, i) => {
+    let cls = 'word-chip';
+    if (i === highlightIdx) cls += ' highlight-target';
+    else if (i === currentIdx) cls += ' current';
+    else if (currentIdx !== null && i < currentIdx) cls += ' past';
+    else cls += ' future';
+    return `<div class="${cls}">${w}</div>`;
+  }).join('') + '</div>';
+}
+
+function gateCards(f, i, ctrl, o, cell) {
+  // Each param: { val, label, desc } or null to grey out
+  function card(data, type, color, darkColor) {
+    if (!data) return `<div class="g-card inactive">
+      <div class="g-label" style="color:#aaa">${type}</div>
+      <div class="g-val" style="color:#aaa">\u2014</div>
+      <div class="g-desc" style="color:#aaa">Not the focus of this step.</div>
+    </div>`;
+    return `<div class="g-card ${data.cls}">
+      <div class="g-label" style="color:${color}">${type}</div>
+      <div class="g-val" style="color:${color}">${data.val}</div>
+      <div class="g-desc" style="color:${darkColor}">${data.desc}</div>
+    </div>`;
+  }
+  return `<div class="gate-row">
+    ${card(f, '\u0393<sub>f</sub> Forget', '#8B2020', '#6B1A1A')}
+    ${card(i, '\u0393<sub>i</sub> Input', '#A06400', '#633806')}
+    ${card(ctrl, 'c\u0303 Control', '#534AB7', '#3C3489')}
+    ${card(o, '\u0393<sub>o</sub> Output', '#1A5A8F', '#1A5A8F')}
+  </div>` + (cell ? `<div class="gate-row">${card(cell, 'Cell state c', '#0E7B5A', '#085041')}</div>` : '');
+}
+
+function fullEquations(hl) {
+  // hl: 'all', 'forget', 'input', 'control', 'output', 'cell'
+  const w = (cls, txt) => (hl === 'all' || cls === hl) ? `<span class="eq-${cls[0]}">${txt}</span>` : txt;
+  return `<div class="eq-box">
+    <div style="margin-bottom:2px"><strong>\u2460 Forget gate:</strong></div>
+    <div>${w('forget','\u0393<sub>f</sub>')} = \u03c3(W<sub>f</sub> \u00b7 [a\u27e8t-1\u27e9, x\u27e8t\u27e9] + b<sub>f</sub>)</div>
+    <div style="margin-top:8px"><strong>\u2461 Input gate:</strong></div>
+    <div>${w('input','\u0393<sub>i</sub>')} = \u03c3(W<sub>i</sub> \u00b7 [a\u27e8t-1\u27e9, x\u27e8t\u27e9] + b<sub>i</sub>)</div>
+    <div style="margin-top:8px"><strong>\u2462 Control gate (candidate):</strong></div>
+    <div>${w('control','c\u0303\u27e8t\u27e9')} = tanh(W<sub>c</sub> \u00b7 [a\u27e8t-1\u27e9, x\u27e8t\u27e9] + b<sub>c</sub>)</div>
+    <div style="margin-top:8px"><strong>\u2463 Cell state update:</strong></div>
+    <div>${w('cell','c\u27e8t\u27e9')} = ${w('forget','\u0393<sub>f</sub>')} \u2217 c\u27e8t-1\u27e9 + ${w('input','\u0393<sub>i</sub>')} \u2217 ${w('control','c\u0303\u27e8t\u27e9')}</div>
+    <div style="margin-top:8px"><strong>\u2464 Output gate &amp; hidden state:</strong></div>
+    <div>${w('output','\u0393<sub>o</sub>')} = \u03c3(W<sub>o</sub> \u00b7 [a\u27e8t-1\u27e9, x\u27e8t\u27e9] + b<sub>o</sub>)</div>
+    <div>a\u27e8t\u27e9 = ${w('output','\u0393<sub>o</sub>')} \u2217 tanh(${w('cell','c\u27e8t\u27e9')})</div>
+  </div>`;
+}
+
+function makeTimeline(upTo) {
+  //          The  cat   ,   which already ate  …    ,   was  full  .
+  const gF = [ 0,  0,   1,   1,    1,    1,   1,   1,   1,   0,   0];
+  const gI = [ 0,  1,   0,   0,    0,    0,   0,   0,   0,   0,   0];
+  const gO = [ 0,  0,   0,   0,    0,    0,   0,   0,   1,   0,   0];
+  const cv = ['\u2014','sing.','sing.','sing.','sing.','sing.','sing.','sing.','sing.','sing.','sing.'];
+  const bc = ['#ccc','#D48B1A','#1D9E75','#1D9E75','#1D9E75','#1D9E75','#1D9E75','#1D9E75','#534AB7','#1D9E75','#1D9E75'];
+  const n = Math.min(upTo + 1, words.length);
+  let html = '<div class="mem-timeline">';
+  for (let i = 0; i < n; i++) {
+    html += `<div class="mem-segment">
+      <div class="mem-word">${words[i]}</div>
+      <div class="mem-bar" style="background:${bc[i]};${i===0?'border-radius:4px 0 0 4px;':''}${i===n-1?'border-radius:0 4px 4px 0;':''}">${cv[i]}</div>
+      <div class="mem-gate" style="color:${gF[i]?'#0E7B5A':'#D94F4F'}">\u0393f=${gF[i]}</div>
+      <div class="mem-gate" style="color:${gI[i]?'#A06400':'#aaa'}">\u0393i=${gI[i]}</div>
+      <div class="mem-gate" style="color:${gO[i]?'#1A5A8F':'#aaa'}">\u0393o=${gO[i]}</div>
+    </div>`;
+  }
+  html += '</div>';
+  html += `<div class="legend-row" style="margin-top:8px">
+    <div class="legend-item"><div class="legend-swatch" style="background:#D94F4F"></div>\u0393<sub>f</sub>=0 (forget old)</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#1D9E75"></div>\u0393<sub>f</sub>=1 (keep old)</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#D48B1A"></div>\u0393<sub>i</sub>=1 (write new)</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#2E7BBF"></div>\u0393<sub>o</sub>=1 (expose)</div>
+  </div>`;
+  return html;
+}
+
+// --- step content ---
+
+const stepContent = [
+  // 0: The problem
+  () => `
+    <div class="panel-title">Step 1 \u2014 The long-distance dependency problem</div>
+    <div class="panel-sub">Consider the sentence below. The verb <strong>\u201cwas\u201d</strong> must agree with <strong>\u201ccat\u201d</strong> (singular), not \u201cate\u201d or any word in the subordinate clause. A vanilla RNN would struggle because the relevant information is many timesteps away.</div>
+    ${makeSentence(null, null)}
+    <div class="result-box info">
+      <p class="rb-title">The challenge</p>
+      <p>The model reads word by word, left to right. By the time it reaches \u201cwas\u201d, it needs to <strong>remember</strong> that the subject \u201ccat\u201d is singular \u2014 despite the long intervening clause \u201cwhich already ate \u2026\u201d.</p>
+    </div>
+    <div class="result-box amber" style="margin-top:.75rem">
+      <p class="rb-title">Why vanilla RNNs fail</p>
+      <p>At each timestep the hidden state is overwritten via a tanh activation. Over many steps the \u201csingular\u201d signal gets diluted \u2014 the <strong>vanishing gradient problem</strong>.</p>
+    </div>
+  `,
+
+  // 1: LSTM overview
+  () => `
+    <div class="panel-title">Step 2 \u2014 The LSTM: four gates, one cell</div>
+    <div class="panel-sub">The LSTM solves this with a <strong>cell state c</strong> that acts as a conveyor belt for information, controlled by <strong>four components</strong>: a forget gate, an input gate, a control gate (candidate), and an output gate.</div>
+    ${fullEquations('all')}
+    <div class="gate-row">
+      <div class="g-card forget">
+        <div class="g-label" style="color:#8B2020">\u0393<sub>f</sub> Forget</div>
+        <div class="g-desc" style="color:#6B1A1A">How much of the <strong>old</strong> cell state to keep.</div>
+      </div>
+      <div class="g-card input">
+        <div class="g-label" style="color:#A06400">\u0393<sub>i</sub> Input</div>
+        <div class="g-desc" style="color:#633806">How much of the <strong>new</strong> candidate to write.</div>
+      </div>
+      <div class="g-card control">
+        <div class="g-label" style="color:#534AB7">c\u0303 Control</div>
+        <div class="g-desc" style="color:#3C3489">The proposed <strong>new information</strong> to add (tanh).</div>
+      </div>
+      <div class="g-card output">
+        <div class="g-label" style="color:#1A5A8F">\u0393<sub>o</sub> Output</div>
+        <div class="g-desc" style="color:#1A5A8F">How much of the cell state to <strong>expose</strong> as the hidden state.</div>
+      </div>
+    </div>
+    <div class="result-box info">
+      <p class="rb-title">Key difference from a vanilla RNN</p>
+      <p>The cell state c\u27e8t\u27e9 can carry information across many timesteps via <strong>additive</strong> updates (no tanh squashing). The gates learn when to write, preserve, and read.</p>
+    </div>
+  `,
+
+  // 2: Forget gate
+  () => `
+    <div class="panel-title">Step 3 \u2014 Forget gate \u0393<sub>f</sub></div>
+    <div class="panel-sub">The forget gate decides <strong>what to discard</strong> from the previous cell state. It looks at the previous hidden state a\u27e8t-1\u27e9 and the current input x\u27e8t\u27e9 and outputs a value between 0 and 1 for each element of the cell state.</div>
+    <div class="eq-box">
+      <div><span class="eq-f">\u0393<sub>f</sub></span> = \u03c3(W<sub>f</sub> \u00b7 [a\u27e8t-1\u27e9, x\u27e8t\u27e9] + b<sub>f</sub>)</div>
+      <div style="margin-top:8px">c\u27e8t\u27e9 = <span class="eq-f">\u0393<sub>f</sub></span> \u2217 c\u27e8t-1\u27e9 + \u0393<sub>i</sub> \u2217 c\u0303\u27e8t\u27e9</div>
+    </div>
+    <div class="gate-row">
+      <div class="g-card forget">
+        <div class="g-label" style="color:#8B2020">When \u0393<sub>f</sub> = 1</div>
+        <div class="g-val" style="color:#8B2020">Keep</div>
+        <div class="g-desc" style="color:#6B1A1A">The old cell state is fully preserved. Nothing is forgotten.</div>
+      </div>
+      <div class="g-card" style="background:#f5f5f5;border-color:#ccc">
+        <div class="g-label" style="color:#888">When \u0393<sub>f</sub> = 0</div>
+        <div class="g-val" style="color:#888">Erase</div>
+        <div class="g-desc" style="color:#888">The old cell state is completely erased. The cell starts fresh.</div>
+      </div>
+    </div>
+    <div class="result-box red">
+      <p class="rb-title">In our example</p>
+      <p>At \u201ccat\u201d, the forget gate will set \u0393<sub>f</sub> \u2248 0 to <strong>clear out</strong> whatever was stored before (\u201cThe\u201d) and make room for new subject information. Then through the subordinate clause, \u0393<sub>f</sub> = 1 to <strong>preserve</strong> the \u201csingular\u201d signal.</p>
+    </div>
+  `,
+
+  // 3: Input gate
+  () => `
+    <div class="panel-title">Step 4 \u2014 Input gate \u0393<sub>i</sub></div>
+    <div class="panel-sub">The input gate decides <strong>how much of the new candidate</strong> to write into the cell state. It works in tandem with the control gate (candidate c\u0303) to add new information.</div>
+    <div class="eq-box">
+      <div><span class="eq-i">\u0393<sub>i</sub></span> = \u03c3(W<sub>i</sub> \u00b7 [a\u27e8t-1\u27e9, x\u27e8t\u27e9] + b<sub>i</sub>)</div>
+      <div style="margin-top:8px">c\u27e8t\u27e9 = \u0393<sub>f</sub> \u2217 c\u27e8t-1\u27e9 + <span class="eq-i">\u0393<sub>i</sub></span> \u2217 c\u0303\u27e8t\u27e9</div>
+    </div>
+    <div class="gate-row">
+      <div class="g-card input">
+        <div class="g-label" style="color:#A06400">When \u0393<sub>i</sub> = 1</div>
+        <div class="g-val" style="color:#A06400">Write</div>
+        <div class="g-desc" style="color:#633806">The full candidate c\u0303 is added to the cell state. New information is stored.</div>
+      </div>
+      <div class="g-card" style="background:#f5f5f5;border-color:#ccc">
+        <div class="g-label" style="color:#888">When \u0393<sub>i</sub> = 0</div>
+        <div class="g-val" style="color:#888">Block</div>
+        <div class="g-desc" style="color:#888">The candidate is blocked. No new information enters the cell.</div>
+      </div>
+    </div>
+    <div class="result-box amber">
+      <p class="rb-title">In our example</p>
+      <p>At \u201ccat\u201d, \u0393<sub>i</sub> = 1 to <strong>write</strong> the \u201csingular\u201d candidate into the cell. Through the subordinate clause, \u0393<sub>i</sub> = 0 so no new information overwrites the stored subject.</p>
+    </div>
+    <div class="result-box info" style="margin-top:.75rem">
+      <p class="rb-title">\u0393<sub>f</sub> and \u0393<sub>i</sub> are independent</p>
+      <p>Unlike the GRU (where a single update gate handles both), the LSTM has <strong>separate</strong> forget and input gates. This means the cell can simultaneously keep some old info (\u0393<sub>f</sub> = 1) and add new info (\u0393<sub>i</sub> = 1), or erase and rewrite, or do nothing at all.</p>
+    </div>
+  `,
+
+  // 4: Control gate (candidate)
+  () => `
+    <div class="panel-title">Step 5 \u2014 Control gate (candidate c\u0303)</div>
+    <div class="panel-sub">The control gate computes the <strong>candidate new information</strong> that could be written to the cell. It uses a tanh activation, producing values in [\u22121, 1]. Whether this candidate actually gets written depends on the input gate \u0393<sub>i</sub>.</div>
+    <div class="eq-box">
+      <div><span class="eq-c">c\u0303\u27e8t\u27e9</span> = tanh(W<sub>c</sub> \u00b7 [a\u27e8t-1\u27e9, x\u27e8t\u27e9] + b<sub>c</sub>)</div>
+      <div style="margin-top:8px">c\u27e8t\u27e9 = \u0393<sub>f</sub> \u2217 c\u27e8t-1\u27e9 + \u0393<sub>i</sub> \u2217 <span class="eq-c">c\u0303\u27e8t\u27e9</span></div>
+    </div>
+    <div class="gate-row">
+      <div class="g-card control">
+        <div class="g-label" style="color:#534AB7">What c\u0303 computes</div>
+        <div class="g-desc" style="color:#3C3489">A <strong>proposed update</strong> to the cell state, based on the current input x\u27e8t\u27e9 and the previous hidden state a\u27e8t-1\u27e9. Think of it as: \u201cif we were to write something new, this is what it would be.\u201d</div>
+      </div>
+    </div>
+    <div class="result-box info">
+      <p class="rb-title">Control vs. input gate</p>
+      <p>The <strong>control gate</strong> decides <em>what</em> to write (the content). The <strong>input gate</strong> decides <em>whether</em> to write it (the gating). They are separate: c\u0303 is always computed, but only written when \u0393<sub>i</sub> lets it through.</p>
+    </div>
+    <div class="result-box amber" style="margin-top:.75rem">
+      <p class="rb-title">In our example</p>
+      <p>At \u201ccat\u201d, c\u0303 encodes \u201csubject is singular.\u201d At \u201cwhich\u201d, c\u0303 might encode something about relative clauses \u2014 but \u0393<sub>i</sub> = 0 blocks it from reaching the cell.</p>
+    </div>
+  `,
+
+  // 5: Output gate
+  () => `
+    <div class="panel-title">Step 6 \u2014 Output gate \u0393<sub>o</sub></div>
+    <div class="panel-sub">The output gate controls <strong>how much of the cell state to expose</strong> as the hidden state a\u27e8t\u27e9. The cell can store information silently (not affecting predictions) until the output gate opens.</div>
+    <div class="eq-box">
+      <div><span class="eq-o">\u0393<sub>o</sub></span> = \u03c3(W<sub>o</sub> \u00b7 [a\u27e8t-1\u27e9, x\u27e8t\u27e9] + b<sub>o</sub>)</div>
+      <div style="margin-top:8px">a\u27e8t\u27e9 = <span class="eq-o">\u0393<sub>o</sub></span> \u2217 tanh(c\u27e8t\u27e9)</div>
+    </div>
+    <div class="gate-row">
+      <div class="g-card output">
+        <div class="g-label" style="color:#1A5A8F">When \u0393<sub>o</sub> = 1</div>
+        <div class="g-val" style="color:#1A5A8F">Expose</div>
+        <div class="g-desc" style="color:#1A5A8F">The full cell state (after tanh) is passed to the hidden state a\u27e8t\u27e9 and can influence predictions.</div>
+      </div>
+      <div class="g-card" style="background:#f5f5f5;border-color:#ccc">
+        <div class="g-label" style="color:#888">When \u0393<sub>o</sub> = 0</div>
+        <div class="g-val" style="color:#888">Suppress</div>
+        <div class="g-desc" style="color:#888">The cell state is hidden. Information is stored but does not affect the current output or predictions.</div>
+      </div>
+    </div>
+    <div class="result-box blue">
+      <p class="rb-title">In our example</p>
+      <p>Through the subordinate clause, \u0393<sub>o</sub> \u2248 0 \u2014 the \u201csingular\u201d information is stored in the cell but <strong>suppressed</strong> from the hidden state (it\u2019s not relevant for predicting \u201cwhich\u201d, \u201calready\u201d, etc.). At \u201cwas\u201d, \u0393<sub>o</sub> = 1 and the singular signal is <strong>exposed</strong> to drive the correct prediction.</p>
+    </div>
+    <div class="result-box info" style="margin-top:.75rem">
+      <p class="rb-title">Cell \u2260 hidden state</p>
+      <p>This is a crucial LSTM feature: the cell state c and the hidden state a are <strong>different</strong>. The cell is the long-term memory; the hidden state is the working output. The output gate bridges them.</p>
+    </div>
+  `,
+
+  // 6: At "cat" — all gates in action
+  () => `
+    <div class="panel-title">Step 7 \u2014 At \u201ccat\u201d: all four gates in action</div>
+    <div class="panel-sub">The model reads \u201ccat\u201d and recognises it as a singular noun subject. Let\u2019s see what each gate does at this critical timestep.</div>
+    ${makeSentence(1, null)}
+    ${gateCards(
+      { cls:'forget', val:'0', desc:'Erase old cell contents (\u201cThe\u201d). Make room for new subject info.' },
+      { cls:'input',  val:'1', desc:'Open the gate \u2014 write the new candidate into the cell.' },
+      { cls:'control',val:'\u201csing.\u201d', desc:'Candidate encodes: \u201csubject is singular.\u201d' },
+      { cls:'output', val:'0', desc:'Suppress \u2014 no need to expose \u201csingular\u201d in the output yet.' },
+      { cls:'cell-st',val:'\u201csingular\u201d', desc:'Cell state now stores the singular-subject signal.' }
+    )}
+    <div class="eq-box">
+      <div><strong>Cell update at \u201ccat\u201d:</strong></div>
+      <div style="margin-top:4px">c\u27e8t\u27e9 = <span class="eq-f">0</span> \u2217 c\u27e8t-1\u27e9 + <span class="eq-i">1</span> \u2217 <span class="eq-c">c\u0303\u27e8t\u27e9</span></div>
+      <div style="margin-top:4px">c\u27e8t\u27e9 = c\u0303\u27e8t\u27e9 \u2009 \u2190 <strong>old erased, new written</strong></div>
+      <div style="margin-top:8px"><strong>Hidden state:</strong></div>
+      <div>a\u27e8t\u27e9 = <span class="eq-o">0</span> \u2217 tanh(c\u27e8t\u27e9) = 0 \u2009 \u2190 <strong>suppressed</strong></div>
+    </div>
+    <div class="result-box amber">
+      <p class="rb-title">Result</p>
+      <p>The LSTM has written \u201csingular\u201d into the cell (\u0393<sub>f</sub> = 0 erases, \u0393<sub>i</sub> = 1 writes) and suppressed it from the output (\u0393<sub>o</sub> = 0). The information is stored silently, ready for later.</p>
+    </div>
+  `,
+
+  // 7: Persist through clause, then payoff at "was"
+  () => `
+    <div class="panel-title">Step 8 \u2014 Persist through the clause, then \u201cwas\u201d</div>
+    <div class="panel-sub">Through \u201cwhich already ate \u2026\u201d the forget gate keeps the cell intact (\u0393<sub>f</sub> = 1) while the input gate blocks new writes (\u0393<sub>i</sub> = 0). At \u201cwas\u201d, the output gate finally opens.</div>
+    ${makeSentence(8, 1)}
+    <div style="font-size:13px;font-weight:600;color:#666;margin:1rem 0 .5rem">During \u201cwhich already ate \u2026\u201d:</div>
+    ${gateCards(
+      { cls:'cell-st', val:'1', desc:'KEEP \u2014 preserve the \u201csingular\u201d signal in the cell.' },
+      { cls:'inactive',val:'0', desc:'BLOCK \u2014 no new information enters the cell.' },
+      null,
+      { cls:'inactive',val:'0', desc:'SUPPRESS \u2014 \u201csingular\u201d stays hidden, not needed yet.' },
+      null
+    )}
+    <div class="eq-box">
+      <div>c\u27e8t\u27e9 = <span class="eq-f">1</span> \u2217 c\u27e8t-1\u27e9 + <span class="eq-i">0</span> \u2217 c\u0303\u27e8t\u27e9 = c\u27e8t-1\u27e9 \u2009 \u2190 <strong>perfect copy</strong></div>
+    </div>
+    <div style="font-size:13px;font-weight:600;color:#666;margin:1.25rem 0 .5rem">At \u201cwas\u201d:</div>
+    ${gateCards(
+      { cls:'cell-st', val:'1', desc:'KEEP \u2014 don\u2019t erase, we still need this info.' },
+      { cls:'inactive',val:'0', desc:'BLOCK \u2014 not writing new subject info.' },
+      null,
+      { cls:'output',  val:'1', desc:'EXPOSE \u2014 \u201csingular\u201d is now sent to the hidden state a\u27e8t\u27e9.' },
+      null
+    )}
+    <div class="eq-box">
+      <div>a\u27e8t\u27e9 = <span class="eq-o">1</span> \u2217 tanh(c\u27e8t\u27e9) \u2009 \u2190 <strong>\u201csingular\u201d exposed</strong></div>
+    </div>
+    <div style="display:flex;gap:10px;margin:1rem 0;flex-wrap:wrap">
+      <div style="flex:1;min-width:160px;background:#E1F5EE;border:1.5px solid #1D9E75;border-radius:10px;padding:1rem;text-align:center">
+        <div style="font-size:12px;color:#0E7B5A;font-weight:600;margin-bottom:4px">\u2713 CORRECT</div>
+        <div style="font-size:24px;font-weight:700;color:#085041">\u201cwas\u201d</div>
+        <div style="font-size:12px;color:#0E7B5A;margin-top:4px">singular \u2014 matches \u201ccat\u201d</div>
+      </div>
+      <div style="flex:1;min-width:160px;background:#FDECEC;border:1.5px solid #D94F4F;border-radius:10px;padding:1rem;text-align:center">
+        <div style="font-size:12px;color:#8B2020;font-weight:600;margin-bottom:4px">\u2717 WRONG</div>
+        <div style="font-size:24px;font-weight:700;color:#6B1A1A">\u201cwere\u201d</div>
+        <div style="font-size:12px;color:#8B2020;margin-top:4px">plural \u2014 would disagree</div>
+      </div>
+    </div>
+    ${makeTimeline(8)}
+    <div class="result-box success">
+      <p class="rb-title">\u2713 Long-distance agreement achieved</p>
+      <p>\u0393<sub>f</sub> = 1 preserved the cell for 6 timesteps. \u0393<sub>i</sub> = 0 blocked interference. \u0393<sub>o</sub> = 1 at the right moment exposed \u201csingular\u201d to produce the correct verb.</p>
+    </div>
+  `,
+
+  // 8: Full picture
+  () => `
+    <div class="panel-title">Step 9 \u2014 The full picture</div>
+    <div class="panel-sub">The complete timeline of all gates and the cell state across the entire sentence.</div>
+    ${makeSentence(null, null)}
+    ${makeTimeline(10)}
+    ${fullEquations('all')}
+    <div class="gate-row">
+      <div class="g-card forget">
+        <div class="g-label" style="color:#8B2020">\u0393<sub>f</sub> Forget</div>
+        <div class="g-desc" style="color:#6B1A1A"><strong>= 1</strong>: keep old cell state.<br><strong>= 0</strong>: erase old cell state.</div>
+      </div>
+      <div class="g-card input">
+        <div class="g-label" style="color:#A06400">\u0393<sub>i</sub> Input</div>
+        <div class="g-desc" style="color:#633806"><strong>= 1</strong>: write candidate to cell.<br><strong>= 0</strong>: block new information.</div>
+      </div>
+      <div class="g-card control">
+        <div class="g-label" style="color:#534AB7">c\u0303 Control</div>
+        <div class="g-desc" style="color:#3C3489">Proposed new information (tanh). Only written when \u0393<sub>i</sub> lets it through.</div>
+      </div>
+      <div class="g-card output">
+        <div class="g-label" style="color:#1A5A8F">\u0393<sub>o</sub> Output</div>
+        <div class="g-desc" style="color:#1A5A8F"><strong>= 1</strong>: expose cell to hidden state.<br><strong>= 0</strong>: suppress cell from output.</div>
+      </div>
+    </div>
+    <div class="result-box info" style="margin-top:1rem">
+      <p class="rb-title">Key takeaway</p>
+      <p>The four components give the LSTM fine-grained control: <strong>\u0393<sub>f</sub></strong> decides what to forget, <strong>\u0393<sub>i</sub></strong> decides what to write, <strong>c\u0303</strong> provides the content, and <strong>\u0393<sub>o</sub></strong> decides what to expose. This separation allows the cell to store \u201csingular\u201d silently through irrelevant words and reveal it exactly when needed.</p>
+    </div>
+    <div class="result-box amber" style="margin-top:.75rem">
+      <p class="rb-title">In practice</p>
+      <p>All gates are sigmoid outputs taking continuous values in (0, 1). The binary values used here illustrate the extreme cases. A trained LSTM learns nuanced, continuous gate values for each element of the cell state.</p>
+    </div>
+    <div class="result-box blue" style="margin-top:.75rem">
+      <p class="rb-title">LSTM vs GRU</p>
+      <p>The GRU merges the forget and input gates into a single update gate (\u0393<sub>u</sub> + 1\u2212\u0393<sub>u</sub> = 1), and has no separate output gate or cell state. The LSTM\u2019s independent gates give it more expressive power, but at the cost of more parameters.</p>
+    </div>
+  `
+];
+
+function render() {
+  buildStepper();
+  document.getElementById('panel-content').innerHTML = stepContent[ls]();
+  document.getElementById('btn-prev').disabled = ls === 0;
+  document.getElementById('btn-next').disabled = ls === STEPS - 1;
+  document.getElementById('btn-next').textContent = ls === STEPS - 1 ? 'Done \u2713' : 'Next \u2192';
+}
+
+function navigate(dir) {
+  if (dir === 1 && ls < STEPS - 1) ls++;
+  else if (dir === -1 && ls > 0) ls--;
+  render();
+}
+
+render();
+</script>
+</body>
+</html>
